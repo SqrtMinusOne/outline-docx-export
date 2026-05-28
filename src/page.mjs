@@ -100,7 +100,7 @@ export function renderPage({ basePath, documentValue = "", error = "" }) {
 <body>
   <main>
     <h1>Outline DOCX Export</h1>
-    <p>Export a single Outline document to DOCX using your own Outline API token.</p>
+    <p>Export a single Outline document to DOCX using your current Outline session or an API token.</p>
     ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
     <form method="post" action="${escapeAttribute(basePath)}/export">
       <label>
@@ -109,8 +109,8 @@ export function renderPage({ basePath, documentValue = "", error = "" }) {
       </label>
       <label>
         Outline API token
-        <input id="token" name="token" type="password" autocomplete="off" required>
-        <small>The token is sent to this service for this request and is not stored server-side.</small>
+        <input id="token" name="token" type="password" autocomplete="off">
+        <small>Optional when this page is served on the same domain as Outline and you are signed in.</small>
       </label>
       <label class="row">
         <input id="remember" type="checkbox">

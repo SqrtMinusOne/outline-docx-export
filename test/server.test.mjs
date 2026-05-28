@@ -86,4 +86,21 @@ describe("createServer", () => {
       /Product Spec\.docx/
     );
   });
+
+  it("uses the Outline accessToken cookie when no API token is submitted", async () => {
+    const response = await fetch(`${baseUrl}/docx-export/export`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: "other=value; accessToken=session-token",
+      },
+      body: new URLSearchParams({
+        document: "https://outline.example.com/doc/spec-abcdefghij",
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(exportRequest.documentId, "spec-abcdefghij");
+    assert.equal(exportRequest.token, "session-token");
+  });
 });

@@ -3,9 +3,13 @@
 A small sidecar service that exports a single Outline document as DOCX without
 building or deploying a custom Outline image.
 
-The service runs next to Outline, calls Outline’s public API with the user’s own
-API token, converts the exported Markdown to DOCX with Pandoc, and returns the
-generated file.
+The service runs next to Outline, calls Outline’s public API as the current
+Outline user, converts the exported Markdown to DOCX with Pandoc, and returns
+the generated file.
+
+When served on the same public domain as Outline, the exporter uses the existing
+Outline session cookie. If the exporter is hosted on a different domain, users
+can paste an Outline API token instead.
 
 ## What it provides
 
@@ -21,12 +25,15 @@ generated file.
 
    `https://your-outline-domain.example/docx-export/`
 
-2. Create an Outline API token:
+2. If the exporter is served on the same domain as Outline and you are already
+   signed in, leave the API token field empty.
+
+   If the exporter is hosted elsewhere, create an Outline API token:
 
    `Settings -> API keys -> New API key`
 
    Use a token with read access. The service uses the permissions of this token,
-   so users can only export documents that token owner can download.
+   so users can only export documents that the token owner can download.
 
 3. Paste either:
 
@@ -35,14 +42,14 @@ generated file.
    - a document slug, for example `project-plan-abcdefghij`
    - a document UUID
 
-4. Paste the API token and click `Download DOCX`.
+4. Optionally paste the API token and click `Download DOCX`.
 
 5. Optional: drag the `Export DOCX` bookmarklet from the exporter page to the
    browser bookmarks bar. While viewing an Outline document, click the
    bookmarklet to open the exporter with the document URL prefilled.
 
-Tokens are not stored server-side. The page stores the token in browser
-`sessionStorage` by default, or in `localStorage` if the user selects
+API tokens are not stored server-side. If a token is entered, the page stores it
+in browser `sessionStorage` by default, or in `localStorage` if the user selects
 `Remember token in this browser`.
 
 ## Local run
@@ -72,73 +79,23 @@ This project includes a standalone `Dockerfile` and `docker-compose.yml`.
 The image installs Pandoc inside the exporter container. It does not modify the
 Outline container.
 
-## Deploying with your current Outline setup
+### Docker Compose
 
-Your current deployment directory is:
-
-`/opt/deploy/outline`
-
-with this shape:
-
-```text
-/opt/deploy/outline
-├── data
-├── docker-compose.yml
-├── docker.env
-└── redis.conf
-```
-
-and Outline is exposed only locally:
-
-```yaml
-ports:
-  - "127.0.0.1:3000:3000"
-```
-
-That is fine. The exporter should also listen only on localhost, and your
-existing reverse proxy should publish it under the same public domain at
-`/docx-export`.
-
-### 1. Copy this project to the server
-
-Example location:
-
-```bash
-sudo mkdir -p /opt/deploy/outline-docx-export
-sudo rsync -a ./ /opt/deploy/outline-docx-export/
-cd /opt/deploy/outline-docx-export
-```
-
-### 2. Configure the exporter
-
-Create `/opt/deploy/outline-docx-export/.env`:
+Create `.env`:
 
 ```bash
 OUTLINE_BASE_URL=http://host.docker.internal:3000
 DOCX_EXPORT_BASE_PATH=/docx-export
 ```
 
-Because your Outline container publishes `127.0.0.1:3000:3000` on the Docker
-host, `host.docker.internal:3000` is the simplest way for the exporter container
-to reach Outline.
-
-On Linux, the provided compose file below adds:
-
-```yaml
-extra_hosts:
-  - "host.docker.internal:host-gateway"
-```
-
-If you instead attach the exporter to the same Docker network as Outline, you can
-use:
+Start the service:
 
 ```bash
-OUTLINE_BASE_URL=http://outline:3000
+docker compose up -d --build
 ```
 
-### 3. Use this compose file
-
-`/opt/deploy/outline-docx-export/docker-compose.yml`:
+The included compose file builds the service, binds it to localhost, and maps
+`host.docker.internal` on Linux:
 
 ```yaml
 services:
@@ -156,29 +113,54 @@ services:
       - "127.0.0.1:3010:3010"
 ```
 
-The repository’s default compose file already matches this shape.
-
-### 4. Start the service
-
-```bash
-cd /opt/deploy/outline-docx-export
-docker compose up -d --build
-docker compose ps
-```
-
-Health check from the server:
+Health check:
 
 ```bash
 curl http://127.0.0.1:3010/docx-export/health
 ```
 
-Expected shape:
+Expected response:
 
 ```json
 {"status":"ok","pandoc":"pandoc ..."}
 ```
 
-### 5. Add reverse proxy routing
+### Docker CLI
+
+Build:
+
+```bash
+docker build -t outline-docx-export .
+```
+
+Run:
+
+```bash
+docker run -d \
+  --name outline-docx-export \
+  --restart unless-stopped \
+  --add-host host.docker.internal:host-gateway \
+  -e OUTLINE_BASE_URL=http://host.docker.internal:3000 \
+  -e PUBLIC_BASE_PATH=/docx-export \
+  -p 127.0.0.1:3010:3010 \
+  outline-docx-export
+```
+
+### Choosing `OUTLINE_BASE_URL`
+
+Set `OUTLINE_BASE_URL` to an internal URL that the exporter container can use to
+reach Outline.
+
+Common choices:
+
+- `http://host.docker.internal:3000` when Outline publishes port `3000` on the
+  Docker host.
+- `http://outline:3000` when this service is attached to the same Docker network
+  as an Outline service named `outline`.
+- `https://outline.example.com` when the container should call Outline through
+  the public HTTPS endpoint.
+
+## Reverse proxy
 
 Route this path on the same public domain as Outline:
 
@@ -201,6 +183,20 @@ Then open:
 
 `https://your-outline-domain.example/docx-export/`
 
+Same-domain routing is recommended because the browser will send Outline’s
+`accessToken` cookie to the exporter. The exporter then forwards that session
+token to Outline’s API, so users do not need to create or paste API tokens.
+
+If the exporter is served on a separate domain or subdomain that does not receive
+Outline’s cookies, users must enter an API token manually.
+
+If you use a different path, set both:
+
+```bash
+DOCX_EXPORT_BASE_PATH=/your-path
+PUBLIC_BASE_PATH=/your-path
+```
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -215,7 +211,11 @@ Then open:
 
 ## Troubleshooting
 
-- `401` from Outline: the API token is missing, expired, or invalid.
+- `401` from Outline: the session cookie or API token is missing, expired, or
+  invalid.
+- `401` with an empty token field: the exporter did not receive Outline’s
+  `accessToken` cookie. Use the same public domain as Outline or enter an API
+  token.
 - `403` from Outline: the token owner cannot download that document.
 - DOCX has missing images: check whether Outline attachments are accessible from
   inside the exporter container and whether signed URLs are enabled by your
@@ -230,5 +230,6 @@ Then open:
 - Prefer exposing it only through your reverse proxy, not directly to the
   internet.
 - Keep `ports: "127.0.0.1:3010:3010"` so it only binds to localhost.
-- Tokens are submitted to the exporter for conversion requests, so deploy this
-  only on infrastructure you control and serve it over HTTPS.
+- The exporter receives either the Outline session cookie or a pasted API token
+  for conversion requests, so deploy this only on infrastructure you control and
+  serve it over HTTPS.

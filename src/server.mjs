@@ -53,10 +53,13 @@ async function handleRequest(req, res, options) {
   if (req.method === "POST" && routePath === "/export") {
     const body = await readRequestBody(req);
     const documentId = normalizeDocumentInput(String(body.document || ""));
-    const token = String(body.token || "").trim();
+    const token =
+      String(body.token || "").trim() || getCookieValue(req, "accessToken");
 
     if (!token) {
-      throw new UserInputError("Enter an Outline API token.");
+      throw new UserInputError(
+        "Sign in to Outline on this domain or enter an Outline API token."
+      );
     }
 
     const document = await options.outlineClient.fetchDocument({
@@ -180,6 +183,30 @@ function sendText(res, status, body) {
     "Cache-Control": "no-store",
   });
   res.end(body);
+}
+
+function getCookieValue(req, name) {
+  const header = req.headers.cookie;
+
+  if (!header) {
+    return "";
+  }
+
+  for (const part of header.split(";")) {
+    const [rawName, ...rawValue] = part.trim().split("=");
+
+    if (rawName !== name) {
+      continue;
+    }
+
+    try {
+      return decodeURIComponent(rawValue.join("="));
+    } catch (_err) {
+      return rawValue.join("=");
+    }
+  }
+
+  return "";
 }
 
 function getAttachmentDisposition(filename) {

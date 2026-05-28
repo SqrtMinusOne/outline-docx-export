@@ -144,7 +144,7 @@ function getErrorMessage(body, status) {
   }
 
   if (status === 401) {
-    return "Outline rejected the API token.";
+    return "Outline rejected the authentication token.";
   }
 
   if (status === 403) {
