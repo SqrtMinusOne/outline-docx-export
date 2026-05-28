@@ -1,0 +1,13 @@
+services:
+  docx-export:
+    build:
+      context: .
+    restart: unless-stopped
+    env_file: ./.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PUBLIC_BASE_PATH: ${DOCX_EXPORT_BASE_PATH:-/docx-export}
+      PORT: 3010
+    ports:
+      - "127.0.0.1:3010:3010"
