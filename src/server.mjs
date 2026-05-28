@@ -12,7 +12,10 @@ import { renderPage } from "./page.mjs";
  *     publicBasePath: string;
  *     conversionTimeoutMs: number;
  *   };
- *   outlineClient: { fetchDocument(options: { documentId: string; token: string }): Promise<{ title: string; markdown: string }> };
+ *   outlineClient: {
+ *     fetchDocument(options: { documentId: string; token: string }): Promise<{ title: string; markdown: string }>;
+ *     checkConnection?: () => Promise<{ ok: boolean; status: number; body: string }>;
+ *   };
  *   convertMarkdownToDocx: (options: { title: string; markdown: string; timeoutMs: number }) => Promise<Buffer>;
  *   getPandocVersion: () => Promise<string>;
  * }} options server dependencies.
@@ -35,6 +38,37 @@ async function handleRequest(req, res, options) {
   if (req.method === "GET" && routePath === "/health") {
     const pandoc = await options.getPandocVersion();
     sendJson(res, 200, { status: "ok", pandoc });
+    return;
+  }
+
+  if (req.method === "GET" && routePath === "/debug/cookies") {
+    const cookieNames = getCookieNames(req);
+
+    sendJson(res, 200, {
+      hasCookieHeader: Boolean(req.headers.cookie),
+      hasAccessToken: Boolean(getCookieValue(req, "accessToken")),
+      cookieNames,
+    });
+    return;
+  }
+
+  if (req.method === "GET" && routePath === "/debug/upstream") {
+    if (typeof options.outlineClient.checkConnection !== "function") {
+      sendJson(res, 501, { error: "upstream health check is unavailable" });
+      return;
+    }
+
+    try {
+      const result = await options.outlineClient.checkConnection();
+      sendJson(res, result.ok ? 200 : 502, result);
+    } catch (err) {
+      sendJson(res, err.status || 502, {
+        ok: false,
+        status: err.status || 502,
+        error: err.message,
+        details: err.details,
+      });
+    }
     return;
   }
 
@@ -134,7 +168,7 @@ async function readRequestBody(req) {
 function handleError(req, res, basePath, err) {
   const status = err instanceof UserInputError ? 400 : err.status || 500;
   const message =
-    status >= 500
+    status >= 500 && err.name !== "OutlineApiError"
       ? "The DOCX export failed. Check the service logs for details."
       : err.message;
 
@@ -143,6 +177,7 @@ function handleError(req, res, basePath, err) {
       name: err.name,
       message: err.message,
       status: err.status,
+      details: err.details,
     });
   }
 
@@ -207,6 +242,19 @@ function getCookieValue(req, name) {
   }
 
   return "";
+}
+
+function getCookieNames(req) {
+  const header = req.headers.cookie;
+
+  if (!header) {
+    return [];
+  }
+
+  return header
+    .split(";")
+    .map((part) => part.trim().split("=")[0])
+    .filter(Boolean);
 }
 
 function getAttachmentDisposition(filename) {

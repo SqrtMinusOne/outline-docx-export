@@ -84,7 +84,7 @@ Outline container.
 Create `.env`:
 
 ```bash
-OUTLINE_BASE_URL=http://host.docker.internal:3000
+OUTLINE_BASE_URL=https://outline.example.com
 DOCX_EXPORT_BASE_PATH=/docx-export
 ```
 
@@ -94,8 +94,7 @@ Start the service:
 docker compose up -d --build
 ```
 
-The included compose file builds the service, binds it to localhost, and maps
-`host.docker.internal` on Linux:
+The included compose file builds the service and binds it to localhost:
 
 ```yaml
 services:
@@ -104,8 +103,6 @@ services:
       context: .
     restart: unless-stopped
     env_file: ./.env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       PUBLIC_BASE_PATH: ${DOCX_EXPORT_BASE_PATH:-/docx-export}
       PORT: 3010
@@ -139,8 +136,7 @@ Run:
 docker run -d \
   --name outline-docx-export \
   --restart unless-stopped \
-  --add-host host.docker.internal:host-gateway \
-  -e OUTLINE_BASE_URL=http://host.docker.internal:3000 \
+  -e OUTLINE_BASE_URL=https://outline.example.com \
   -e PUBLIC_BASE_PATH=/docx-export \
   -p 127.0.0.1:3010:3010 \
   outline-docx-export
@@ -153,12 +149,28 @@ reach Outline.
 
 Common choices:
 
-- `http://host.docker.internal:3000` when Outline publishes port `3000` on the
-  Docker host.
 - `http://outline:3000` when this service is attached to the same Docker network
   as an Outline service named `outline`.
 - `https://outline.example.com` when the container should call Outline through
   the public HTTPS endpoint.
+- `http://127.0.0.1:3000` only when the exporter uses host networking, not the
+  default Docker bridge network.
+
+If Outline is published on the host as `127.0.0.1:3000:3000`, a separate Docker
+container normally cannot reach it through `host.docker.internal:3000` because
+the host service is bound only to host loopback. Use one of these instead:
+
+- attach the exporter to the same Docker network as Outline and use
+  `OUTLINE_BASE_URL=http://outline:3000`;
+- set `OUTLINE_BASE_URL` to the public HTTPS URL of Outline;
+- run the exporter with host networking and use
+  `OUTLINE_BASE_URL=http://127.0.0.1:3000`.
+
+To check what the exporter can reach, open:
+
+```text
+/docx-export/debug/upstream
+```
 
 ## Reverse proxy
 

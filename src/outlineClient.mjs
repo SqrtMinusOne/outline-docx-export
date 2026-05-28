@@ -1,9 +1,11 @@
 export class OutlineApiError extends Error {
-  constructor(message, status, body) {
+  constructor(message, status, body, cause) {
     super(message);
     this.name = "OutlineApiError";
     this.status = status;
     this.body = body;
+    this.cause = cause;
+    this.details = cause ? getErrorDetails(cause) : undefined;
   }
 }
 
@@ -103,11 +105,59 @@ export class OutlineClient {
 
       return body;
     } catch (err) {
+      if (err instanceof OutlineApiError) {
+        throw err;
+      }
+
       if (err.name === "AbortError") {
         throw new OutlineApiError("Outline request timed out.", 504);
       }
 
-      throw err;
+      throw new OutlineApiError(
+        getFetchFailureMessage(err, this.baseUrl),
+        502,
+        undefined,
+        err
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * Checks whether the configured Outline URL is reachable.
+   *
+   * @returns {Promise<{ ok: boolean; status: number; body: string }>} health check result.
+   */
+  async checkConnection() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+
+    try {
+      const response = await fetch(`${this.baseUrl}/_health`, {
+        method: "GET",
+        signal: controller.signal,
+        headers: {
+          Accept: "text/plain, application/json",
+        },
+      });
+
+      return {
+        ok: response.ok,
+        status: response.status,
+        body: (await response.text()).slice(0, 200),
+      };
+    } catch (err) {
+      if (err.name === "AbortError") {
+        throw new OutlineApiError("Outline health check timed out.", 504);
+      }
+
+      throw new OutlineApiError(
+        getFetchFailureMessage(err, this.baseUrl),
+        502,
+        undefined,
+        err
+      );
     } finally {
       clearTimeout(timeout);
     }
@@ -152,4 +202,31 @@ function getErrorMessage(body, status) {
   }
 
   return `Outline request failed with status ${status}.`;
+}
+
+function getFetchFailureMessage(err, baseUrl) {
+  const details = getErrorDetails(err);
+  const suffix = details ? ` ${details}` : "";
+
+  return `Could not reach Outline at ${baseUrl}.${suffix}`;
+}
+
+function getErrorDetails(err) {
+  const cause = err?.cause;
+  const code = cause?.code || err?.code;
+  const message = cause?.message || err?.message;
+
+  if (code && message) {
+    return `${code}: ${message}`;
+  }
+
+  if (code) {
+    return String(code);
+  }
+
+  if (message) {
+    return String(message);
+  }
+
+  return "";
 }
